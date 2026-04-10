@@ -16,9 +16,9 @@ body {
 
 /* Theme variables - default is LIGHT */
 :root {
-  --color-background: #fafafa;
-  --color-surface: #ffffff;
-  --color-border: #e5e5e5;
+  --color-background: #d5d5d5;
+  --color-surface: #ededed;
+  --color-border: #dcdcdc;
   --color-text: #171717;
   --color-muted: #737373;
   --scrollbar-track: #f5f5f5;
