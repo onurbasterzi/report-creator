@@ -1,7 +1,7 @@
 import express from 'express';
 import db from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { generateReport, editWithAI } from '../services/ai.js';
+import { generateReport, generateFreeReport, generateFreeTextReport, editWithAI } from '../services/ai.js';
 
 const router = express.Router();
 
@@ -17,37 +17,52 @@ function checkProjectOwnership(projectId, userId) {
 router.post('/projects/:id/reports', async (req, res) => {
   try {
     const { id } = req.params;
-    const { entryIds, provider, model, language } = req.body;
+    const { entryIds, provider, model, language, mode, freeText } = req.body;
 
     // Check ownership
     if (!checkProjectOwnership(id, req.user.id)) {
       return res.status(404).json({ error: 'Proje bulunamadı' });
     }
 
-    // Get entries
-    let entries;
-    if (entryIds && Array.isArray(entryIds) && entryIds.length > 0) {
-      // Get specific entries
-      entries = db.prepare(`
-        SELECT e.* FROM entries e
-        JOIN projects p ON e.project_id = p.id
-        WHERE e.id IN (${entryIds.map(() => '?').join(',')}) AND e.project_id = ? AND p.user_id = ?
-      `).all([...entryIds], id, req.user.id);
+    let content = '';
+    const reportMode = mode || 'structured';
+
+    // Free Text Mode - no entries needed
+    if (reportMode === 'freeText') {
+      if (!freeText || freeText.trim().length === 0) {
+        return res.status(400).json({ error: 'Rapor metni boş olamaz' });
+      }
+      content = await generateFreeTextReport(freeText, provider, model, language);
     } else {
-      // Get all entries for the project
-      entries = db.prepare(`
-        SELECT e.* FROM entries e
-        JOIN projects p ON e.project_id = p.id
-        WHERE e.project_id = ? AND p.user_id = ?
-        ORDER BY e.date DESC
-      `).all(id, req.user.id);
-    }
+      // Get entries for structured or free mode
+      let entries;
+      if (entryIds && Array.isArray(entryIds) && entryIds.length > 0) {
+        // Get specific entries (convert string IDs to integers)
+        entries = db.prepare(`
+          SELECT e.* FROM entries e
+          JOIN projects p ON e.project_id = p.id
+          WHERE e.id IN (${entryIds.map(() => '?').join(',')}) AND e.project_id = ? AND p.user_id = ?
+        `).all(...entryIds.map(id => parseInt(id)), parseInt(id), req.user.id);
+      } else {
+        // Get all entries for the project
+        entries = db.prepare(`
+          SELECT e.* FROM entries e
+          JOIN projects p ON e.project_id = p.id
+          WHERE e.project_id = ? AND p.user_id = ?
+          ORDER BY e.date DESC
+        `).all(id, req.user.id);
+      }
 
-    if (entries.length === 0) {
-      return res.status(400).json({ error: 'Rapor üretmek için en az bir entry olmalı' });
-    }
+      if (entries.length === 0) {
+        return res.status(400).json({ error: 'Rapor üretmek için en az bir entry olmalı' });
+      }
 
-    const content = await generateReport(entries, provider, model, language);
+      if (reportMode === 'free') {
+        content = await generateFreeReport(entries, provider, model, language);
+      } else {
+        content = await generateReport(entries, provider, model, language);
+      }
+    }
 
     // Save report
     const result = db.prepare(`

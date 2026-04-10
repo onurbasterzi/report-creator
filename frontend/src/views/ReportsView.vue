@@ -36,11 +36,14 @@ const selectedEntryIds = ref([])
 const deletingReport = ref(null)
 const selectedProvider = ref('')
 const selectedLanguage = ref('en')
+const reportMode = ref('structured')
+const freeTextInput = ref('')
 
 const API_URL = '/api'
 
 const reportEligibleCategories = ['deadlines', 'working', 'completed', 'planning', 'risks_blockers']
 
+// Structured mode: sadece rapor-eligible kategoriler
 const sortedEntries = computed(() => {
   return [...entriesStore.entries]
     .filter(e => reportEligibleCategories.includes(e.category))
@@ -49,6 +52,24 @@ const sortedEntries = computed(() => {
       if (dateCompare !== 0) return dateCompare
       return new Date(b.created_at) - new Date(a.created_at)
     })
+})
+
+// Free mode: tüm kategoriler
+const allEntries = computed(() => {
+  return [...entriesStore.entries]
+    .sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date)
+      if (dateCompare !== 0) return dateCompare
+      return new Date(b.created_at) - new Date(a.created_at)
+    })
+})
+
+// Modal'da gösterilecek entries (mode'a göre)
+const modalEntries = computed(() => {
+  if (reportMode.value === 'free') {
+    return allEntries.value
+  }
+  return sortedEntries.value
 })
 
 const providerOptions = computed(() => {
@@ -130,15 +151,19 @@ function openGenerateModal() {
     router.push('/settings')
     return
   }
-  if (sortedEntries.value.length === 0) {
-    toastStore.show('Rapor oluşturmak için rapora dahil kategorilerde task olmalı.', 'error')
-    return
+  // Free text mode doesn't need entries
+  if (reportMode.value !== 'freeText') {
+    if (modalEntries.value.length === 0) {
+      toastStore.show('Rapor oluşturmak için task olmalı.', 'error')
+      return
+    }
+    // Select all by default
+    selectedEntryIds.value = modalEntries.value.map(e => e.id)
   }
-  // Select all by default
-  selectedEntryIds.value = sortedEntries.value.map(e => e.id)
   // Set defaults
   selectedProvider.value = settingsStore.settings.provider || 'gemini'
   selectedLanguage.value = 'en'
+  freeTextInput.value = ''
   showSelectModal.value = true
 }
 
@@ -152,7 +177,7 @@ function toggleEntry(entryId) {
 }
 
 function selectAll() {
-  selectedEntryIds.value = sortedEntries.value.map(e => e.id)
+  selectedEntryIds.value = modalEntries.value.map(e => e.id)
 }
 
 function selectNone() {
@@ -160,9 +185,16 @@ function selectNone() {
 }
 
 async function generateReport() {
-  if (selectedEntryIds.value.length === 0) {
-    toastStore.show('En az bir task seçmelisiniz.', 'error')
-    return
+  if (reportMode.value === 'freeText') {
+    if (!freeTextInput.value.trim()) {
+      toastStore.show('Rapor metni boş olamaz.', 'error')
+      return
+    }
+  } else {
+    if (selectedEntryIds.value.length === 0) {
+      toastStore.show('En az bir task seçmelisiniz.', 'error')
+      return
+    }
   }
 
   showSelectModal.value = false
@@ -175,7 +207,9 @@ async function generateReport() {
         entryIds: selectedEntryIds.value,
         provider: selectedProvider.value,
         model: selectedModel.value,
-        language: selectedLanguage.value
+        language: selectedLanguage.value,
+        mode: reportMode.value,
+        freeText: freeTextInput.value
       })
     })
     const data = await res.json()
@@ -254,7 +288,7 @@ watch(
       :subtitle="projectsStore.currentProject?.name"
     >
       <BaseButton
-        v-if="projectsStore.currentProject && sortedEntries.length > 0"
+        v-if="projectsStore.currentProject"
         :loading="generating"
         @click="openGenerateModal"
       >
@@ -382,8 +416,44 @@ watch(
           />
         </div>
 
-        <!-- Task Selection -->
+        <!-- Mode Selection -->
         <div>
+          <label class="text-sm font-medium text-muted mb-2 block">Rapor Modu</label>
+          <div class="flex gap-2">
+            <button
+              :class="['px-4 py-2 rounded-lg border text-sm', reportMode === 'structured' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted hover:border-muted']"
+              @click="reportMode = 'structured'"
+            >
+              Yapılandırılmış
+            </button>
+            <button
+              :class="['px-4 py-2 rounded-lg border text-sm', reportMode === 'free' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted hover:border-muted']"
+              @click="reportMode = 'free'"
+            >
+              Serbest
+            </button>
+            <button
+              :class="['px-4 py-2 rounded-lg border text-sm', reportMode === 'freeText' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted hover:border-muted']"
+              @click="reportMode = 'freeText'"
+            >
+              Metin
+            </button>
+          </div>
+        </div>
+
+        <!-- Free Text Mode -->
+        <div v-if="reportMode === 'freeText'">
+          <label class="text-sm font-medium text-muted mb-2 block">Rapor İçeriği</label>
+          <textarea
+            v-model="freeTextInput"
+            rows="8"
+            class="w-full bg-surface border border-border rounded-lg p-3 text-text resize-none"
+            placeholder="Rapor için notlarınızı veya taslak içeriğinizi buraya yazın..."
+          />
+        </div>
+
+        <!-- Task Selection (Structured & Free modes) -->
+        <div v-if="reportMode !== 'freeText'">
           <div class="flex items-center justify-between mb-2">
             <label class="text-sm font-medium text-muted">{{ t('reports.selectTasks') }}</label>
             <div class="flex gap-2">
@@ -396,7 +466,7 @@ watch(
 
           <div class="space-y-2 border border-border rounded-lg p-3">
             <div
-              v-for="entry in sortedEntries"
+              v-for="entry in modalEntries"
               :key="entry.id"
               :class="[
                 'p-3 rounded-lg border cursor-pointer transition-all',
@@ -432,7 +502,7 @@ watch(
           <BaseButton variant="ghost" @click="showSelectModal = false">
             {{ t('project.cancel') }}
           </BaseButton>
-          <BaseButton :loading="generating" :disabled="selectedEntryIds.length === 0" @click="generateReport">
+          <BaseButton :loading="generating" :disabled="reportMode === 'freeText' ? !freeTextInput.trim() : selectedEntryIds.length === 0" @click="generateReport">
             {{ t('reports.generate') }}
           </BaseButton>
         </div>

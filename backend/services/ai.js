@@ -278,6 +278,146 @@ ${lang.headers.risks}
   }
 }
 
+export async function generateFreeReport(entries, forcedProvider = null, model = null, language = 'en') {
+  console.log('Generating FREE report for', entries.length, 'entries', forcedProvider ? 'with provider: ' + forcedProvider : '', 'model:', model, 'language:', language);
+
+  const settings = db.prepare('SELECT provider, gemini_api_key, minimax_api_key FROM settings WHERE id = 1').get();
+
+  const activeProvider = forcedProvider || settings?.provider;
+
+  let apiKey;
+  if (activeProvider === 'minimax') {
+    apiKey = settings?.minimax_api_key;
+  } else if (activeProvider === 'gemini') {
+    apiKey = settings?.gemini_api_key;
+  }
+
+  if (activeProvider !== 'gemini_cli' && !apiKey) {
+    throw new Error(activeProvider + ' API anahtarı tanımlanmamış. Lütfen ayarlardan API anahtarınızı girin.');
+  }
+
+  const provider = AI_PROVIDERS[activeProvider];
+  if (!provider) {
+    throw new Error('Geçersiz AI sağlayıcı: ' + activeProvider);
+  }
+
+  // Language prompts for free mode
+  const languageMap = {
+    'en': {
+      instruction: `You are a professional report writer. Write a cohesive, well-structured report in English based on the notes below. Use professional business language. Organize the content logically without using headers or section markers - just flowing paragraphs. The report should feel like it was written by a senior project manager. Write in complete sentences, avoid bullet points, and create smooth transitions between topics.`,
+      closing: `Write the complete report now as a single flowing document.`
+    },
+    'tr': {
+      instruction: `Sen profesyonel bir rapor yazarısın. Aşağıdaki notlardan Türkçe dilinde, akıcı ve profesyonel bir rapor yaz. Başlık veya bölüm işareti kullanma - sadece düzgün paragraflar halinde yaz. Cümlelerle yaz, madde işareti kullanma, konular arası geçişler yap. Rapor, kıdemli bir proje yöneticisi tarafından yazılmış gibi hissettirmeli.`,
+      closing: `Şimdi tam raporu tek bir akıcı belge olarak yaz.`
+    },
+    'de': {
+      instruction: `Sie sind ein professioneller Berichtsschreiber. Schreiben Sie einen zusammenhängenden, gut strukturierten Bericht auf DEUTSCH basierend auf den untenstehenden Notizen. Verwenden Sie professionelle Geschäftssprache. Organisieren Sie den Inhalt logisch ohne Überschriften oder Abschnittsmarkierungen - nur fließende Absätze. Der Bericht sollte sich anfühlen, als wäre er von einem erfahrenen Projektmanager geschrieben worden.`,
+      closing: `Schreiben Sie den vollständigen Bericht jetzt als ein einziges fließendes Dokument.`
+    },
+    'fr': {
+      instruction: `Vous êtes un rédacteur de rapports professionnel. Rédigez un rapport cohérent et bien structuré en FRANÇAIS basé sur les notes ci-dessous. Utilisez un langage d'affaires professionnel. Organisez le contenu logiquement sans utiliser d'en-têtes ou de marqueurs de section - juste des paragraphes fluides. Le rapport devrait sembler avoir été écrit par un chef de projet senior.`,
+      closing: `Écrivez le rapport complet maintenant comme un seul document fluide.`
+    },
+    'es': {
+      instruction: `Eres un escritor de informes profesional. Escribe un informe cohesivo y bien estructurado en ESPAÑOL basado en las notas a continuación. Usa lenguaje comercial profesional. Organiza el contenido lógicamente sin usar encabezados o marcadores de sección - solo párrafos fluidos. El informe debería sentirse como si hubiera sido escrito por un gerente de proyecto senior.`,
+      closing: `Escribe el informe completo ahora como un solo documento fluido.`
+    }
+  };
+
+  const lang = languageMap[language] || languageMap['en'];
+
+  const prompt = `${lang.instruction}
+
+Notlar:
+${entries.map(e => `- ${e.description}`).join('\n')}
+
+${lang.closing}`;
+
+  console.log('Calling AI provider:', provider.name, 'with model:', model);
+
+  try {
+    const content = await provider.generate(apiKey, prompt, model);
+    console.log('Free report generated successfully, length:', content.length);
+    return content;
+  } catch (err) {
+    console.error('AI generate error:', err.message);
+    throw err;
+  }
+}
+
+export async function generateFreeTextReport(userText, forcedProvider = null, model = null, language = 'en') {
+  console.log('Generating FREE TEXT report', forcedProvider ? 'with provider: ' + forcedProvider : '', 'model:', model, 'language:', language);
+
+  if (!userText || userText.trim().length === 0) {
+    throw new Error('Rapor metni boş olamaz.');
+  }
+
+  const settings = db.prepare('SELECT provider, gemini_api_key, minimax_api_key FROM settings WHERE id = 1').get();
+
+  const activeProvider = forcedProvider || settings?.provider;
+
+  let apiKey;
+  if (activeProvider === 'minimax') {
+    apiKey = settings?.minimax_api_key;
+  } else if (activeProvider === 'gemini') {
+    apiKey = settings?.gemini_api_key;
+  }
+
+  if (activeProvider !== 'gemini_cli' && !apiKey) {
+    throw new Error(activeProvider + ' API anahtarı tanımlanmamış. Lütfen ayarlardan API anahtarınızı girin.');
+  }
+
+  const provider = AI_PROVIDERS[activeProvider];
+  if (!provider) {
+    throw new Error('Geçersiz AI sağlayıcı: ' + activeProvider);
+  }
+
+  // Language prompts for free text mode
+  const languageMap = {
+    'en': {
+      instruction: `You are a professional report editor and writer. Transform the raw notes below into a polished, professional report in English. Use proper paragraph structure, smooth transitions, and professional business language. Remove any redundancy, fix grammar issues, and organize the content logically. The output should be suitable for a formal project report. Do not add any headers, section markers, or bullet points - just flowing prose.`,
+      closing: `Return only the transformed report as clean prose, nothing else.`
+    },
+    'tr': {
+      instruction: `Sen profesyonel bir rapor editörü ve yazarısın. Aşağıdaki ham notları düzgün, profesyonel bir Türkçe rapora dönüştür. Uygun paragraf yapısı, akıcı geçişler ve profesyonel iş dili kullan. Gereksiz tekrarları kaldır, dilbilgisi sorunlarını düzelt ve içeriği mantıksal olarak düzenle. Çıktı, resmi bir proje raporu için uygun olmalı. Başlık, bölüm işareti veya madde işareti ekleme - sadece akıcı düzyazı.`,
+      closing: `Sadece dönüştürülmüş raporu temiz düzyazı olarak döndür, başka bir şey ekleme.`
+    },
+    'de': {
+      instruction: `Sie sind ein professioneller Berichtseditor und -schreiber. Wandeln Sie die unten stehenden rohen Notizen in einen polierten, professionellen Bericht auf DEUTSCH um. Verwenden Sie eine ordnungsgemäße Absatzstruktur, glatte Übergänge und professionelle Geschäftssprache. Entfernen Sie Redundanzen, beheben Sie Grammatikprobleme und organisieren Sie den Inhalt logisch. Fügen Sie keine Überschriften, Abschnittsmarkierungen oder Aufzählungszeichen hinzu - nur fließende Prosa.`,
+      closing: `Geben Sie nur den transformierten Bericht als saubere Prosa zurück, nichts anderes.`
+    },
+    'fr': {
+      instruction: `Vous êtes un éditeur et rédacteur de rapports professionnel. Transformez les notes brutes ci-dessous en un rapport professionnel et soigné en FRANÇAIS. Utilisez une structure de paragraphes appropriée, des transitions fluides et un langage d'affaires professionnel. Supprimez les redondances, corrigez les problèmes de grammaire et organisez le contenu logiquement. N'ajoutez aucun en-tête, marqueur de section ou point de balle - juste de la prose fluide.`,
+      closing: `Retournez uniquement le rapport transformé en prose claire, rien d'autre.`
+    },
+    'es': {
+      instruction: `Eres un editor y escritor de informes profesional. Transforma las notas sin procesar a continuación en un informe profesional y pulido en ESPAÑOL. Usa la estructura de párrafos adecuada, transiciones fluidas y lenguaje comercial profesional. Elimina redundancias, corrige problemas de gramática y organiza el contenido lógicamente. No agregues encabezados, marcadores de sección ni puntos de viñeta - solo prosa fluida.`,
+      closing: `Devuelve solo el informe transformado como prosa limpia, nada más.`
+    }
+  };
+
+  const lang = languageMap[language] || languageMap['en'];
+
+  const prompt = `${lang.instruction}
+
+Ham Notlar:
+${userText}
+
+${lang.closing}`;
+
+  console.log('Calling AI provider:', provider.name, 'with model:', model);
+
+  try {
+    const content = await provider.generate(apiKey, prompt, model);
+    console.log('Free text report generated successfully, length:', content.length);
+    return content;
+  } catch (err) {
+    console.error('AI generate error:', err.message);
+    throw err;
+  }
+}
+
 export async function editWithAI(text, command, provider = 'gemini', model = null, language = 'en') {
   console.log('AI edit request:', command, 'provider:', provider, 'model:', model, 'language:', language);
 
